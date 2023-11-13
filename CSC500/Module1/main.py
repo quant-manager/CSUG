@@ -44,7 +44,7 @@ from mpmath import mpf, mp
 
 class MyRealNumberType(Enum) :
     """
-        An Enum class representing enumarted types of floating point numbers.
+        An Enum class representing enumerated types of floating point numbers.
 
         Static Attributes:
             FLOAT (int): Python native "float" type.
