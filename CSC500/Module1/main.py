@@ -190,7 +190,7 @@ def main():
             N/A
     """
 
-    INT_NUM_DEC_DIGITS_PRECISION = 100
+    INT_NUM_DEC_DIGITS_PRECISION = 50
     getcontext().prec = INT_NUM_DEC_DIGITS_PRECISION
     mp.dps = INT_NUM_DEC_DIGITS_PRECISION
     # enum_type = MyRealNumberType.FLOAT
@@ -200,7 +200,7 @@ def main():
     ###########################################################################
     # Part 1
     ###########################################################################
-    print("\nStarting Part 1: Addition and Subtraction.\n")
+    print("\nStarting Part 1: Addition and Subtraction.")
     while True :
         str_num1_value = input(
             '\nInput floating point real number for the left operand,' +
@@ -222,12 +222,12 @@ def main():
         print()
         print(num1, "+", num2, "=", num_sum)
         print(num1, "-", num2, "=", num_difference)
-    print("\nCompleted Part 1: Addition and Subtraction.\n")
+    print("\nCompleted Part 1: Addition and Subtraction.")
 
     ###########################################################################
     # Part 2
     ###########################################################################
-    print("\nStarting Part 2: Multiplication and Division.\n")
+    print("\nStarting Part 2: Multiplication and Division.")
     while True :
         str_num1_value = input(
             '\nInput floating point real number for the left operand,' +
@@ -249,7 +249,7 @@ def main():
         print()
         print(num1, "*", num2, "=", num_product)
         print(num1, "/", num2, "=", num_ratio)
-    print("\nCompleted Part 2: Multiplication and Division.\n")
+    print("\nCompleted Part 2: Multiplication and Division.")
 
 
 if __name__ ==  '__main__':
