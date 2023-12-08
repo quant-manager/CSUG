@@ -27,7 +27,9 @@ Documentation style: https://realpython.com/documenting-python-code/
 
 Revision History:
 
-    1. 12/11/2023: Initial Draft.
+    1. 12/7/2023: Initial Draft.
+    2. 12/8/2023: Updated comments regarding conditional probabilities feature,
+                  which can be added.
 
 @author: James J Johnson
 @url: https://www.linkedin.com/in/james-james-johnson/
@@ -67,15 +69,17 @@ Revision History:
 ###############################################################################
 # Do not consider input of conditional probabilities P(A | B) to compute
 # P(A and B) == P(A | B) * P(B) == P(B | A) * P(A).
-# Otherwise, that would require a square matrix of conditional probabilities
-# as an input (the main diagonal is set to 1's, and the lower triangle can be
-# derived with Bayes Theorem Formula from the upper triangle area):
+# Otherwise, that would require providing a conditional probability to each
+# fuzzy operator, regardless whether it is applied to and atomic or composite
+# operands. The following example demonstrates the point:
+#    x1.And(x2, P_x1_given_x2).Or(x3, P_both_x1_and_x2_given_x3).
+# The Bayes Theorem Formula can be used to derive the symmetrical conditional
+# probability, as needed:
 # P(A | B) = [P(B | A) * P(A)] / P(B).
 # P(B | A) = [P(A | B) * P(B)] / P(A).
-# The user would populate the upper triangle, while the main diagonal and
-# the lower triangle would be computed internally. Later, during fuzzy logic
-# expression evaluation, the products P(A | B) * P(B) would be used in
-# calculations instead of P(A) * P(B). This feature is not implemented yet!
+# During fuzzy logic expression evaluation, the products P(A | B) * P(B) would
+# be used in calculations instead of P(A) * P(B). This feature is not
+# implemented yet!
 ###############################################################################
 
 
