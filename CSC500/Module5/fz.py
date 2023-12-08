@@ -70,7 +70,7 @@ Revision History:
 # Do not consider input of conditional probabilities P(A | B) to compute
 # P(A and B) == P(A | B) * P(B) == P(B | A) * P(A).
 # Otherwise, that would require providing a conditional probability to each
-# fuzzy operator, regardless whether it is applied to and atomic or composite
+# fuzzy operator, regardless whether it is applied to atomic or composite
 # operands. The following example demonstrates the point:
 #    x1.And(x2, P_x1_given_x2).Or(x3, P_both_x1_and_x2_given_x3).
 # The Bayes Theorem Formula can be used to derive the symmetrical conditional
