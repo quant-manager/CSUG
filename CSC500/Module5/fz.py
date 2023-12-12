@@ -32,6 +32,9 @@ Revision History:
                   which can be added.
     3. 12/12/2023: Added support for conditional probabilities, and thus
                    removed assumption about independence of variables.
+    4. 12/12/2023: Added support for "str" as input type for fuzzy Boolean
+                   value. Added feature that allaows optional conditional
+                   probabilities.
 
 @author: James J Johnson
 @url: https://www.linkedin.com/in/james-james-johnson/
@@ -75,6 +78,9 @@ Revision History:
 # P(A and B) = P(A) * P(B) for independent.
 # P(A and B) = P(A) = P(B) for identical.
 ###############################################################################
+# When Fzb._bool_acp is True but Fzb._bool_rcp is False, P(A | B) is used
+# only when it is provided for A, or else P(A) is used.
+###############################################################################
 # When Fzb._bool_rcp is True, conditional probabilities P(A | B) are used.
 # It means that conditional probability must be provided for each fuzzy
 # operator, regardless whether it is applied to atomic or composite
@@ -102,7 +108,7 @@ Revision History:
 ###############################################################################
 
 
-from decimal import Decimal, getcontext
+from decimal import Decimal, getcontext, InvalidOperation
 from mpmath import mpf, mp
 from sys import float_info
 
@@ -117,6 +123,7 @@ class Fzb :
     getcontext().prec = INT_NUMBER_OF_DIGITS_AFTER_DECIMAL_POINT
     mp.dps = INT_NUMBER_OF_DIGITS_AFTER_DECIMAL_POINT
 
+    _bool_acp = False
     _bool_rcp = False
 
     # https://stackoverflow.com/questions/9528421/value-for-epsilon-in-python
@@ -128,11 +135,27 @@ class Fzb :
         return eps
 
     def __init__(self, val = None) :
+        self._val = None
+        self._val_type = None
+        self._set_products_sum = None
+        self._dict_cond = None
         if val is not None :
-            if not isinstance(val, bool) and not isinstance(val, float) and \
-               not isinstance(val, Decimal) and not isinstance(val, mpf) :
+            if not isinstance(val, bool) and \
+               not isinstance(val, float) and \
+               not isinstance(val, str) and \
+               not isinstance(val, Decimal) and \
+               not isinstance(val, mpf) :
                 raise TypeError("Invalid value type for fuzzy boolean")
-            _val = val if not isinstance(val, bool) else (float)(val)
+            if isinstance(val, bool) :
+                _val = float(val)
+            elif isinstance(val, str) :
+                try:
+                    _val = Decimal(val)
+                except InvalidOperation as e :
+                    print("Unsupported string value.")
+                    raise e
+            else :
+                _val = val
             self._val = _val
             self._val_type = type(self._val)
             if ((self._val_type)(0.) <= _val <= (self._val_type)(+1.)) :
@@ -145,14 +168,14 @@ class Fzb :
                     frozenset(set_constant), # 1 & only 1 set with a constant
                     frozenset(set_product),
                 }
-                self._dict_cond_fzb_to_fzb = {} if Fzb._bool_rcp else None
+                self._dict_cond = {} if Fzb._bool_acp or Fzb._bool_rcp else None
             else :
                 raise ValueError("Invalid value for fuzzy boolean")
         else : # if val is None
             self._val = None
             self._val_type = None
             self._set_products_sum = set()
-            self._dict_cond_fzb_to_fzb = {} if Fzb._bool_rcp else None
+            self._dict_cond = {} if Fzb._bool_acp or Fzb._bool_rcp else None
 
     def Not(self) : # NOT(x1) = 1 - x1
         (dict_products_consts, set_products_sum) = Fzb._add_val(
@@ -173,9 +196,11 @@ class Fzb :
     def And(self, other) : # AND(x1, x2) = x1 * x2
         if self._val_type != other._val_type :
             raise TypeError("Inconsistent types in And method")
-        if Fzb._bool_rcp :
-            left_operand = self._dict_cond_fzb_to_fzb[other] # must exist!
-        else :
+        if Fzb._bool_acp and not Fzb._bool_rcp and other in self._dict_cond :
+            left_operand = self._dict_cond[other]
+        elif Fzb._bool_rcp :
+            left_operand = self._dict_cond[other] # Exception if not exists
+        else : # other not in self._dict_cond
             left_operand = self
         (dict_products_consts, set_products_sum) = Fzb._add_prod(
             left_operand=left_operand, right_operand=other,
@@ -199,9 +224,11 @@ class Fzb :
             operand=other, dict_products_consts=dict_products_consts,
             set_products_sum=set_products_sum,
             init_const_factor = (self._val_type)(+1.))
-        if Fzb._bool_rcp :
-            left_operand = self._dict_cond_fzb_to_fzb[other] # must exist!
-        else :
+        if Fzb._bool_acp and not Fzb._bool_rcp and other in self._dict_cond :
+            left_operand = self._dict_cond[other]
+        elif Fzb._bool_rcp :
+            left_operand = self._dict_cond[other] # Exception if not exists
+        else : # other not in self._dict_cond
             left_operand = self
         (dict_products_consts, set_products_sum) = Fzb._add_prod(
             left_operand=left_operand, right_operand=other,
@@ -226,9 +253,11 @@ class Fzb :
             operand=other, dict_products_consts=dict_products_consts,
             set_products_sum=set_products_sum,
             init_const_factor = (self._val_type)(+1.))
-        if Fzb._bool_rcp :
-            left_operand = self._dict_cond_fzb_to_fzb[other] # must exist!
-        else :
+        if Fzb._bool_acp and not Fzb._bool_rcp and other in self._dict_cond :
+            left_operand = self._dict_cond[other]
+        elif Fzb._bool_rcp :
+            left_operand = self._dict_cond[other] # Exception if not exists
+        else : # other not in self._dict_cond
             left_operand = self
         (dict_products_consts, set_products_sum) = Fzb._add_prod(
             left_operand=left_operand, right_operand=other,
@@ -253,9 +282,11 @@ class Fzb :
             operand=self, dict_products_consts=dict_products_consts,
             set_products_sum=set_products_sum,
             init_const_factor = (self._val_type)(-1.))
-        if Fzb._bool_rcp :
-            left_operand = self._dict_cond_fzb_to_fzb[other] # must exist!
-        else :
+        if Fzb._bool_acp and not Fzb._bool_rcp and other in self._dict_cond :
+            left_operand = self._dict_cond[other]
+        elif Fzb._bool_rcp :
+            left_operand = self._dict_cond[other] # Exception if not exists
+        else : # other not in self._dict_cond
             left_operand = self
         (dict_products_consts, set_products_sum) = Fzb._add_prod(
             left_operand=left_operand, right_operand=other,
@@ -284,9 +315,11 @@ class Fzb :
             operand=other, dict_products_consts=dict_products_consts,
             set_products_sum=set_products_sum,
             init_const_factor = (self._val_type)(-1.))
-        if Fzb._bool_rcp :
-            left_operand = self._dict_cond_fzb_to_fzb[other] # must exist!
-        else :
+        if Fzb._bool_acp and not Fzb._bool_rcp and other in self._dict_cond :
+            left_operand = self._dict_cond[other]
+        elif Fzb._bool_rcp :
+            left_operand = self._dict_cond[other] # Exception if not exists
+        else : # other not in self._dict_cond
             left_operand = self
         (dict_products_consts, set_products_sum) = Fzb._add_prod(
             left_operand=left_operand, right_operand=other,
@@ -445,34 +478,55 @@ class Fzb :
 
     def conditional_on(self, other : "Fzb", val) :
         # P(A | B) = P(self | other) = Fzb(val)
-        if Fzb._bool_rcp :
-            if self._dict_cond_fzb_to_fzb is None :
-                self._dict_cond_fzb_to_fzb = {}
+        if Fzb._bool_acp or Fzb._bool_rcp :
+            if self._dict_cond is None :
+                self._dict_cond = {}
             if isinstance(val, Fzb) :
                 fzb_val = val
             else :
                 fzb_val = Fzb(val)
-            self._dict_cond_fzb_to_fzb[other] = fzb_val # overwrite if needed
+            self._dict_cond[other] = fzb_val # overwrite if needed
             if self.is_zero() :
                 # P(other | self) = P(other), when P(self) = 0
-                other._dict_cond_fzb_to_fzb[self] = other
+                other._dict_cond[self] = other
             else :
                 # P(other | self) = (P(self | other) * P(other)) / P(self)
-                other._dict_cond_fzb_to_fzb[self] = \
+                other._dict_cond[self] = \
                     Fzb(fzb_val.value() * other.value() / self.value())
 
     def given(self, other : "Fzb") :
         # Return value of conditional probability
-        return self._dict_cond_fzb_to_fzb[other].value()
+        if Fzb._bool_acp and not Fzb._bool_rcp and other in self._dict_cond :
+            return self._dict_cond[other].value()
+        elif Fzb._bool_rcp :
+            return self._dict_cond[other].value()
+        else : # other not in self._dict_cond
+            return self.value()
 
     def assume_independence(bool_indep : bool = True) :
+        Fzb.allow_conditional_probabilities(bool_acp = not bool_indep)
         Fzb.require_conditional_probabilities(bool_rcp = not bool_indep)
 
+    def assume_independence_by_default(bool_indep_by_dft : bool = True) :
+        Fzb.allow_conditional_probabilities(bool_acp = True)
+        Fzb.require_conditional_probabilities(bool_rcp = not bool_indep_by_dft)
+
+    def allow_conditional_probabilities(bool_acp : bool = True) :
+        # If Fzb._bool_acp == True, value from self._dict_cond
+        # (not self._val) will be used to for expression building in And, Or,
+        # Xor, If, and Iff methods in each Fzb object, as long as it exist,
+        # or else self._val is used.
+        Fzb._bool_acp = bool_acp
+
     def require_conditional_probabilities(bool_rcp : bool = True) :
-        # If Fzb._bool_rcp == True, values from self._dict_cond_fzb_to_fzb
-        # (not self._val) will be used to for expression build-up in And, Or,
-        # Xor, If, and Iff methods in each Fzb object.
+        # If Fzb._bool_rcp == True, value from self._dict_cond
+        # (not self._val) will be used to for expression building in And, Or,
+        # Xor, If, and Iff methods in each Fzb object, as long as it exist,
+        # or else an exception of type "InvalidOperation" is raised.
+        if bool_rcp :
+            Fzb._bool_acp = True
         Fzb._bool_rcp = bool_rcp
+
 
 def main():
     fb_flt_x = Fzb(float(   0.7566666666666666666666666666666666666))
@@ -586,8 +640,15 @@ def main():
     print( ( (x3.Not().And(x5.Or(x1))).And(x4.Or(x8)).Or(x9.Not().And(x5.Not())) ) ) # 0.385720
 
 ###############################################################################
+
+    # from decimal import Decimal
+    # from mpmath import mpf
+    # from fz import Fzb
+
+    # Fzb.assume_independence_by_default(bool_indep_by_dft = True)
+    # Fzb.allow_conditional_probabilities(bool_acp = True)
+    # Fzb.assume_independence(bool_indep=False) # equivalent to the call below
     Fzb.require_conditional_probabilities(bool_rcp=True)
-    # Fzb.assume_independence(bool_indep=False) # equivalent to the above call
 
     print()
     print("Using conditional probabilities for independent variables:")
