@@ -30,6 +30,8 @@ Revision History:
     1. 12/7/2023: Initial Draft.
     2. 12/8/2023: Updated comments regarding conditional probabilities feature,
                   which can be added.
+    3. 12/12/2023: Added support for conditional probabilities, and thus
+                   removed assumption about independence of variables.
 
 @author: James J Johnson
 @url: https://www.linkedin.com/in/james-james-johnson/
@@ -67,19 +69,36 @@ Revision History:
 # P(not A) == 1 - P(A)
 #
 ###############################################################################
-# Do not consider input of conditional probabilities P(A | B) to compute
-# P(A and B) == P(A | B) * P(B) == P(B | A) * P(A).
-# Otherwise, that would require providing a conditional probability to each
-# fuzzy operator, regardless whether it is applied to atomic or composite
-# operands. The following example demonstrates the point:
-#    x1.And(x2, P_x1_given_x2).Or(x3, P_both_x1_and_x2_given_x3).
-# The Bayes Theorem Formula can be used to derive the symmetrical conditional
+# When Fzb._bool_rcp is False, conditional probabilities P(A | B) are not used
+# to compute P(A and B) == P(A | B) * P(B) == P(B | A) * P(A). Instead, either
+# independence or identiry rules are used:
+# P(A and B) = P(A) * P(B) for independent.
+# P(A and B) = P(A) = P(B) for identical.
+###############################################################################
+# When Fzb._bool_rcp is True, conditional probabilities P(A | B) are used.
+# It means that conditional probability must be provided for each fuzzy
+# operator, regardless whether it is applied to atomic or composite
+# operands.
+# The Bayes Theorem Formula is used to derive the symmetrical conditional
 # probability, as needed:
 # P(A | B) = [P(B | A) * P(A)] / P(B).
 # P(B | A) = [P(A | B) * P(B)] / P(A).
 # During fuzzy logic expression evaluation, the products P(A | B) * P(B) would
-# be used in calculations instead of P(A) * P(B). This feature is not
-# implemented yet!
+# be used in calculations instead of P(A) * P(B).
+#
+# Each instance of Fzb "A" must has a dictionary of preceeding events
+# Fzb "B" mapped to conditinal probabilities values Fzb P(A | B), which are
+# constructed from one of the following types: "float", Decimal", or "mpf".
+# These conditinal probabilities must be provided in advance, before expression
+# construction (And, Or, Xor, If, Iff). As soon as P(A | B) is provided by the
+# user and is inserted into the dictionary of Fzb "A", P(B | A) is
+# automatically computed and inserted to the dictionary of Fzb "B":
+# P(B | A) = P(A | B) * P(B) / P(A). Evaluation of numeric values
+# ("float", "Decimal", or "mpf") is done for computing new P(B | A) in this
+# expression. Both P(A | B) and P(B | A) are Fzb objects, created from numbers
+# ("float", "Decimal", or "mpf"). During expression building P(A | B) is used
+# instead of P(A) for expanding P(A and B) = P(A | B) * P(B). Note that only
+# multiplication part is affected, but not the addition part.
 ###############################################################################
 
 
@@ -97,6 +116,8 @@ class Fzb :
     MPF_EPS = mpf("2.672764710092195646140536467151481878815196880105e-51")
     getcontext().prec = INT_NUMBER_OF_DIGITS_AFTER_DECIMAL_POINT
     mp.dps = INT_NUMBER_OF_DIGITS_AFTER_DECIMAL_POINT
+
+    _bool_rcp = False
 
     # https://stackoverflow.com/questions/9528421/value-for-epsilon-in-python
     def _generate_epsilon(self):
@@ -124,12 +145,14 @@ class Fzb :
                     frozenset(set_constant), # 1 & only 1 set with a constant
                     frozenset(set_product),
                 }
+                self._dict_cond_fzb_to_fzb = {} if Fzb._bool_rcp else None
             else :
                 raise ValueError("Invalid value for fuzzy boolean")
         else : # if val is None
             self._val = None
             self._val_type = None
             self._set_products_sum = set()
+            self._dict_cond_fzb_to_fzb = {} if Fzb._bool_rcp else None
 
     def Not(self) : # NOT(x1) = 1 - x1
         (dict_products_consts, set_products_sum) = Fzb._add_val(
@@ -150,8 +173,12 @@ class Fzb :
     def And(self, other) : # AND(x1, x2) = x1 * x2
         if self._val_type != other._val_type :
             raise TypeError("Inconsistent types in And method")
+        if Fzb._bool_rcp :
+            left_operand = self._dict_cond_fzb_to_fzb[other] # must exist!
+        else :
+            left_operand = self
         (dict_products_consts, set_products_sum) = Fzb._add_prod(
-            left_operand=self, right_operand=other,
+            left_operand=left_operand, right_operand=other,
             dict_products_consts={}, set_products_sum=set(),
             init_const_factor = (self._val_type)(+1.))
         return Fzb._create(
@@ -172,8 +199,12 @@ class Fzb :
             operand=other, dict_products_consts=dict_products_consts,
             set_products_sum=set_products_sum,
             init_const_factor = (self._val_type)(+1.))
+        if Fzb._bool_rcp :
+            left_operand = self._dict_cond_fzb_to_fzb[other] # must exist!
+        else :
+            left_operand = self
         (dict_products_consts, set_products_sum) = Fzb._add_prod(
-            left_operand=self, right_operand=other,
+            left_operand=left_operand, right_operand=other,
             dict_products_consts=dict_products_consts,
             set_products_sum=set_products_sum,
             init_const_factor = (self._val_type)(-1.))
@@ -195,8 +226,12 @@ class Fzb :
             operand=other, dict_products_consts=dict_products_consts,
             set_products_sum=set_products_sum,
             init_const_factor = (self._val_type)(+1.))
+        if Fzb._bool_rcp :
+            left_operand = self._dict_cond_fzb_to_fzb[other] # must exist!
+        else :
+            left_operand = self
         (dict_products_consts, set_products_sum) = Fzb._add_prod(
-            left_operand=self, right_operand=other,
+            left_operand=left_operand, right_operand=other,
             dict_products_consts=dict_products_consts,
             set_products_sum=set_products_sum,
             init_const_factor = (self._val_type)(-2.))
@@ -218,8 +253,12 @@ class Fzb :
             operand=self, dict_products_consts=dict_products_consts,
             set_products_sum=set_products_sum,
             init_const_factor = (self._val_type)(-1.))
+        if Fzb._bool_rcp :
+            left_operand = self._dict_cond_fzb_to_fzb[other] # must exist!
+        else :
+            left_operand = self
         (dict_products_consts, set_products_sum) = Fzb._add_prod(
-            left_operand=self, right_operand=other,
+            left_operand=left_operand, right_operand=other,
             dict_products_consts=dict_products_consts,
             set_products_sum=set_products_sum,
             init_const_factor = (self._val_type)(+1.))
@@ -245,8 +284,12 @@ class Fzb :
             operand=other, dict_products_consts=dict_products_consts,
             set_products_sum=set_products_sum,
             init_const_factor = (self._val_type)(-1.))
+        if Fzb._bool_rcp :
+            left_operand = self._dict_cond_fzb_to_fzb[other] # must exist!
+        else :
+            left_operand = self
         (dict_products_consts, set_products_sum) = Fzb._add_prod(
-            left_operand=self, right_operand=other,
+            left_operand=left_operand, right_operand=other,
             dict_products_consts=dict_products_consts,
             set_products_sum=set_products_sum,
             init_const_factor = (self._val_type)(+2.))
@@ -400,6 +443,36 @@ class Fzb :
         else :
             raise TypeError("Invalid value type")
 
+    def conditional_on(self, other : "Fzb", val) :
+        # P(A | B) = P(self | other) = Fzb(val)
+        if Fzb._bool_rcp :
+            if self._dict_cond_fzb_to_fzb is None :
+                self._dict_cond_fzb_to_fzb = {}
+            if isinstance(val, Fzb) :
+                fzb_val = val
+            else :
+                fzb_val = Fzb(val)
+            self._dict_cond_fzb_to_fzb[other] = fzb_val # overwrite if needed
+            if self.is_zero() :
+                # P(other | self) = P(other), when P(self) = 0
+                other._dict_cond_fzb_to_fzb[self] = other
+            else :
+                # P(other | self) = (P(self | other) * P(other)) / P(self)
+                other._dict_cond_fzb_to_fzb[self] = \
+                    Fzb(fzb_val.value() * other.value() / self.value())
+
+    def given(self, other : "Fzb") :
+        # Return value of conditional probability
+        return self._dict_cond_fzb_to_fzb[other].value()
+
+    def assume_independence(bool_indep : bool = True) :
+        Fzb.require_conditional_probabilities(bool_rcp = not bool_indep)
+
+    def require_conditional_probabilities(bool_rcp : bool = True) :
+        # If Fzb._bool_rcp == True, values from self._dict_cond_fzb_to_fzb
+        # (not self._val) will be used to for expression build-up in And, Or,
+        # Xor, If, and Iff methods in each Fzb object.
+        Fzb._bool_rcp = bool_rcp
 
 def main():
     fb_flt_x = Fzb(float(   0.7566666666666666666666666666666666666))
@@ -511,6 +584,48 @@ def main():
     print()
     print( ( (~x3 & (x5 | x1)) & (x4 | x8) | (~x9 & ~x5) ) ) # 0.385720
     print( ( (x3.Not().And(x5.Or(x1))).And(x4.Or(x8)).Or(x9.Not().And(x5.Not())) ) ) # 0.385720
+
+###############################################################################
+    Fzb.require_conditional_probabilities(bool_rcp=True)
+    # Fzb.assume_independence(bool_indep=False) # equivalent to the above call
+
+    print()
+    print("Using conditional probabilities for independent variables:")
+    P_A1 = Fzb(.75)
+    P_B1 = Fzb(.25)
+    P_A1_given_B1 = P_A1
+    P_A1.conditional_on(other = P_B1, val = P_A1_given_B1)
+    print("P(A1) = {0:s}".format(str(P_A1)))
+    print("P(B1) = {0:s}".format(str(P_B1)))
+    print("P(A1 | B1) = {0:s}".format(str(P_A1_given_B1)))
+    print("P(B1 | A1) = {0:s}".format(str(P_B1.given(P_A1))))
+    print("and(A1, B1) = {0:s} = {1:s}".format(
+        str(P_A1.And(P_B1)), str(P_A1 & P_B1) ))
+    print("or(A1, B1) = {0:s} = {1:s}".format(
+        str(P_A1.Or(P_B1)), str(P_A1 | P_B1) ))
+    print("and(B1, A1) = {0:s} = {1:s}".format(
+        str(P_B1.And(P_A1)), str(P_B1 & P_A1) ))
+    print("or(B1, A1) = {0:s} = {1:s}".format(
+        str(P_B1.Or(P_A1)), str(P_B1 | P_A1) ))
+
+    print()
+    print("Using conditional probabilities for dependent variables:")
+    P_A2 = Fzb(.75)
+    P_B2 = Fzb(.25)
+    P_A2_given_B2 = Fzb(.5) # not P_A2
+    P_A2.conditional_on(other = P_B2, val = P_A2_given_B2)
+    print("P(A2) = {0:s}".format(str(P_A2)))
+    print("P(B2) = {0:s}".format(str(P_B2)))
+    print("P(A2 | B2) = {0:s}".format(str(P_A2_given_B2)))
+    print("P(B2 | A2) = {0:s}".format(str(P_B2.given(P_A2))))
+    print("and(A2, B2) = {0:s} = {1:s}".format(
+        str(P_A2.And(P_B2)), str(P_A2 & P_B2) ))
+    print("or(A2, B2) = {0:s} = {1:s}".format(
+        str(P_A2.Or(P_B2)), str(P_A2 | P_B2) ))
+    print("and(B2, A2) = {0:s} = {1:s}".format(
+        str(P_B2.And(P_A2)), str(P_B2 & P_A2) ))
+    print("or(B2, A2) = {0:s} = {1:s}".format(
+        str(P_B2.Or(P_A2)), str(P_B2 | P_A2) ))
 
 
 if __name__ ==  '__main__':
