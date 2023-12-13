@@ -33,7 +33,7 @@ Revision History:
     3. 12/12/2023: Added support for conditional probabilities, and thus
                    removed assumption about independence of variables.
     4. 12/12/2023: Added support for "str" as input type for fuzzy Boolean
-                   value. Added feature that allaows optional conditional
+                   value. Added feature that allows optional conditional
                    probabilities.
 
 @author: James J Johnson
