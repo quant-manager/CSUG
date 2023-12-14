@@ -35,6 +35,9 @@ Revision History:
     4. 12/12/2023: Added support for "str" as input type for fuzzy Boolean
                    value. Added feature that allows optional conditional
                    probabilities.
+    5. 12/13/2023: Refactored handling of conditional probabilities (CP). Added
+                   identity support for CPs: P(A|A). Added validation of inputs
+                   when CP value is set for A and B: P(A|B) = value.
 
 @author: James J Johnson
 @url: https://www.linkedin.com/in/james-james-johnson/
@@ -127,14 +130,14 @@ class Fzb :
     _bool_rcp = False
 
     # https://stackoverflow.com/questions/9528421/value-for-epsilon-in-python
-    def _generate_epsilon(self):
+    def _generate_epsilon(self) -> float | Decimal | mpf :
         eps = (self._val_type)(+1.) # float, Decimal, or mpf
         while eps + 1 > 1:
             eps /= 2
         eps *= 2
         return eps
 
-    def __init__(self, val = None) :
+    def __init__(self, val = None) -> None :
         self._val = None
         self._val_type = None
         self._set_products_sum = None
@@ -177,7 +180,7 @@ class Fzb :
             self._set_products_sum = set()
             self._dict_cond = {} if Fzb._bool_acp or Fzb._bool_rcp else None
 
-    def Not(self) : # NOT(x1) = 1 - x1
+    def Not(self) -> "Fzb" : # NOT(x1) = 1 - x1
         (dict_products_consts, set_products_sum) = Fzb._add_val(
             operand=None, dict_products_consts={}, set_products_sum=set(),
             init_const_factor = (self._val_type)(+1.))
@@ -190,20 +193,14 @@ class Fzb :
             dict_products_consts = dict_products_consts,
             set_products_sum = set_products_sum)
 
-    def __invert__(self) : # ~
+    def __invert__(self) -> "Fzb" : # ~
         return self.Not()
 
-    def And(self, other) : # AND(x1, x2) = x1 * x2
+    def And(self, other : "Fzb") -> "Fzb" : # AND(x1, x2) = x1 * x2
         if self._val_type != other._val_type :
             raise TypeError("Inconsistent types in And method")
-        if Fzb._bool_acp and not Fzb._bool_rcp and other in self._dict_cond :
-            left_operand = self._dict_cond[other]
-        elif Fzb._bool_rcp :
-            left_operand = self._dict_cond[other] # Exception if not exists
-        else : # other not in self._dict_cond
-            left_operand = self
         (dict_products_consts, set_products_sum) = Fzb._add_prod(
-            left_operand=left_operand, right_operand=other,
+            left_operand=self.given(other=other), right_operand=other,
             dict_products_consts={}, set_products_sum=set(),
             init_const_factor = (self._val_type)(+1.))
         return Fzb._create(
@@ -211,10 +208,10 @@ class Fzb :
             dict_products_consts = dict_products_consts,
             set_products_sum = set_products_sum)
 
-    def __and__(self, other) : # &
+    def __and__(self, other : "Fzb") -> "Fzb": # &
         return self.And(other=other)
 
-    def Or(self, other) :  # OR(x1, x2) = x1 + x2 - x1 * x2
+    def Or(self, other : "Fzb") -> "Fzb" :  # OR(x1, x2) = x1 + x2 - x1 * x2
         if self._val_type != other._val_type :
             raise TypeError("Inconsistent types in Or method")
         (dict_products_consts, set_products_sum) = Fzb._add_val(
@@ -224,14 +221,8 @@ class Fzb :
             operand=other, dict_products_consts=dict_products_consts,
             set_products_sum=set_products_sum,
             init_const_factor = (self._val_type)(+1.))
-        if Fzb._bool_acp and not Fzb._bool_rcp and other in self._dict_cond :
-            left_operand = self._dict_cond[other]
-        elif Fzb._bool_rcp :
-            left_operand = self._dict_cond[other] # Exception if not exists
-        else : # other not in self._dict_cond
-            left_operand = self
         (dict_products_consts, set_products_sum) = Fzb._add_prod(
-            left_operand=left_operand, right_operand=other,
+            left_operand=self.given(other=other), right_operand=other,
             dict_products_consts=dict_products_consts,
             set_products_sum=set_products_sum,
             init_const_factor = (self._val_type)(-1.))
@@ -240,10 +231,10 @@ class Fzb :
             dict_products_consts = dict_products_consts,
             set_products_sum = set_products_sum)
 
-    def __or__(self, other) : # &
+    def __or__(self, other : "Fzb") -> "Fzb" : # &
         return self.Or(other=other)
 
-    def Xor(self, other) : # XOR(x1, x2) = x1 + x2 - 2 * x1 * x2
+    def Xor(self, other : "Fzb") -> "Fzb" :# XOR(x1,x2) = x1 + x2 - 2 * x1 * x2
         if self._val_type != other._val_type :
             raise TypeError("Inconsistent types in Xor method")
         (dict_products_consts, set_products_sum) = Fzb._add_val(
@@ -253,14 +244,8 @@ class Fzb :
             operand=other, dict_products_consts=dict_products_consts,
             set_products_sum=set_products_sum,
             init_const_factor = (self._val_type)(+1.))
-        if Fzb._bool_acp and not Fzb._bool_rcp and other in self._dict_cond :
-            left_operand = self._dict_cond[other]
-        elif Fzb._bool_rcp :
-            left_operand = self._dict_cond[other] # Exception if not exists
-        else : # other not in self._dict_cond
-            left_operand = self
         (dict_products_consts, set_products_sum) = Fzb._add_prod(
-            left_operand=left_operand, right_operand=other,
+            left_operand=self.given(other=other), right_operand=other,
             dict_products_consts=dict_products_consts,
             set_products_sum=set_products_sum,
             init_const_factor = (self._val_type)(-2.))
@@ -269,10 +254,10 @@ class Fzb :
             dict_products_consts = dict_products_consts,
             set_products_sum = set_products_sum)
 
-    def __xor__(self, other) : # ^
+    def __xor__(self, other : "Fzb") -> "Fzb" : # ^
         return self.Xor(other=other)
 
-    def If(self, other) : # IF(x1, x2) = 1 - x1 + x1 * x2
+    def If(self, other : "Fzb") -> "Fzb" : # IF(x1, x2) = 1 - x1 + x1 * x2
         if self._val_type != other._val_type :
             raise TypeError("Inconsistent types in If method")
         (dict_products_consts, set_products_sum) = Fzb._add_val(
@@ -282,14 +267,8 @@ class Fzb :
             operand=self, dict_products_consts=dict_products_consts,
             set_products_sum=set_products_sum,
             init_const_factor = (self._val_type)(-1.))
-        if Fzb._bool_acp and not Fzb._bool_rcp and other in self._dict_cond :
-            left_operand = self._dict_cond[other]
-        elif Fzb._bool_rcp :
-            left_operand = self._dict_cond[other] # Exception if not exists
-        else : # other not in self._dict_cond
-            left_operand = self
         (dict_products_consts, set_products_sum) = Fzb._add_prod(
-            left_operand=left_operand, right_operand=other,
+            left_operand=self.given(other=other), right_operand=other,
             dict_products_consts=dict_products_consts,
             set_products_sum=set_products_sum,
             init_const_factor = (self._val_type)(+1.))
@@ -298,10 +277,10 @@ class Fzb :
             dict_products_consts = dict_products_consts,
             set_products_sum = set_products_sum)
 
-    def __rshift__(self, other) : # >>
+    def __rshift__(self, other : "Fzb") -> "Fzb" : # >>
         return self.If(other=other)
 
-    def Iff(self, other) : # IFF(x1, x2) = 1 - x1 - x2 + 2 * x1 * x2
+    def Iff(self, other : "Fzb") -> "Fzb" : # IFF(x1,x2)=1 - x1 - x2 + 2*x1*x2
         if self._val_type != other._val_type :
             raise TypeError("Inconsistent types in Iff method")
         (dict_products_consts, set_products_sum) = Fzb._add_val(
@@ -315,14 +294,8 @@ class Fzb :
             operand=other, dict_products_consts=dict_products_consts,
             set_products_sum=set_products_sum,
             init_const_factor = (self._val_type)(-1.))
-        if Fzb._bool_acp and not Fzb._bool_rcp and other in self._dict_cond :
-            left_operand = self._dict_cond[other]
-        elif Fzb._bool_rcp :
-            left_operand = self._dict_cond[other] # Exception if not exists
-        else : # other not in self._dict_cond
-            left_operand = self
         (dict_products_consts, set_products_sum) = Fzb._add_prod(
-            left_operand=left_operand, right_operand=other,
+            left_operand=self.given(other=other), right_operand=other,
             dict_products_consts=dict_products_consts,
             set_products_sum=set_products_sum,
             init_const_factor = (self._val_type)(+2.))
@@ -331,10 +304,10 @@ class Fzb :
             dict_products_consts = dict_products_consts,
             set_products_sum = set_products_sum)
 
-    def __lshift__(self, other) : # <<
+    def __lshift__(self, other : "Fzb") -> "Fzb" : # <<
         return self.Iff(other=other)
 
-    def evaluate(self) :
+    def evaluate(self) -> None :
         products_sum = (self._val_type)(0.)
         for frozen_set_product in self._set_products_sum :
             product = (self._val_type)(+1.)
@@ -345,19 +318,23 @@ class Fzb :
         self._val = max((self._val_type)(0.),
                     min((self._val_type)(+1.), products_sum))
 
-    def value(self) :
+    def value(self) -> float | Decimal | mpf :
         if self._val is None :
             self.evaluate()
         return self._val
 
-    def __bool__(self) :
+    def __bool__(self) -> bool :
         return bool(int(round(self.value())))
 
-    def __str__(self) :
+    def __str__(self) -> str :
         return str(self.value())
 
-    def _add_prod(left_operand, right_operand, dict_products_consts,
-              set_products_sum, init_const_factor) :
+    def _add_prod(left_operand : "Fzb",
+                  right_operand : "Fzb",
+                  dict_products_consts : dict,
+                  set_products_sum : set,
+                  init_const_factor : float | Decimal | mpf,
+                  ) -> tuple :
         for fr_set_left_product in left_operand._set_products_sum :
             for fr_set_right_product in right_operand._set_products_sum :
                 set_new_product = set()
@@ -386,8 +363,11 @@ class Fzb :
                             break
         return (dict_products_consts, set_products_sum)
 
-    def _add_val(operand, dict_products_consts, set_products_sum,
-              init_const_factor) :
+    def _add_val(operand : "Fzb",
+                 dict_products_consts : dict,
+                 set_products_sum : set,
+                 init_const_factor : float | Decimal | mpf,
+                 ) -> None :
         if operand is not None :
             for fr_set_left_product in operand._set_products_sum :
                 set_new_product = set()
@@ -426,8 +406,11 @@ class Fzb :
                         break
         return (dict_products_consts, set_products_sum)
 
-    def _create(val_type, dict_products_consts, set_products_sum,
-                bool_evaluate = False) :
+    def _create(val_type : float | Decimal | mpf,
+                dict_products_consts : dict,
+                set_products_sum : set,
+                bool_evaluate : bool = False,
+                ) -> "Fzb" :
         fzb = Fzb()
         fzb._val_type = val_type
         fzb._set_products_sum = set()
@@ -441,7 +424,8 @@ class Fzb :
             fzb.evaluate() # may be skipped to support lazy evaluation
         return fzb
 
-    def _is_zero(const) :
+    def _is_zero(const #: float | Decimal | mpf | "Fzb",
+                 ) -> bool :
         if isinstance(const, float) :
             return -Fzb.FLT_EPS <= const <= Fzb.FLT_EPS
         elif isinstance(const, Decimal) :
@@ -453,7 +437,21 @@ class Fzb :
         else :
             raise TypeError("Invalid value type")
 
-    def is_zero(self):
+    def __hash__(self) -> int :
+        # Without "__hash__", "__eq__" causes:
+        # "TypeError: unhashable type: 'Fzb'"
+        return id(self)
+
+    def __eq__(self, other : "Fzb") -> bool :
+        if self._val_type != other._val_type :
+            raise TypeError("Inconsistent types in == method")
+        if self is other :
+            return True
+        else :
+            return Fzb._is_zero(
+                (self.value() - other.value()) / (self._val_type)(+2.))
+
+    def is_zero(self) -> bool :
         if self._val_type == float :
             return -Fzb.FLT_EPS <= self.value() <= Fzb.FLT_EPS
         elif self._val_type == Decimal :
@@ -463,7 +461,7 @@ class Fzb :
         else :
             raise TypeError("Invalid value type")
 
-    def is_one(self):
+    def is_one(self) -> bool :
         if self._val_type == float :
             return (self._val_type)(+1.) - Fzb.FLT_EPS <= self.value() <= \
                 (self._val_type)(+1.) + Fzb.FLT_EPS
@@ -476,7 +474,9 @@ class Fzb :
         else :
             raise TypeError("Invalid value type")
 
-    def conditional_on(self, other : "Fzb", val) :
+    def conditional_on(self, other : "Fzb",
+                       val # : float | Decimal | mpf | "Fzb",
+                       ) -> None :
         # P(A | B) = P(self | other) = Fzb(val)
         if Fzb._bool_acp or Fzb._bool_rcp :
             if self._dict_cond is None :
@@ -485,7 +485,95 @@ class Fzb :
                 fzb_val = val
             else :
                 fzb_val = Fzb(val)
-            self._dict_cond[other] = fzb_val # overwrite if needed
+
+            if self is other :
+                if self.is_zero() :
+                    if not fzb_val.is_zero() : # 0 < P(A|A) <= 1; P(A) = 0
+                        raise ValueError("Invalid P(A|A)!=0 for P(A)=0")
+                    else : # P(A|A) = 0; P(A) = 0
+                        self._dict_cond[other] = fzb_val # overwrite if needed
+                elif self.is_one() :
+                    if not fzb_val.is_one() : # 0 <= P(A|A) < 1; P(A) = 1
+                        raise ValueError("Invalid P(A|A)!=1 for P(A)=1")
+                    else : # P(A|A) = 1; P(A) = 1
+                        self._dict_cond[other] = fzb_val # overwrite if needed
+                else :
+                    if not fzb_val.is_one() : # 0 <= P(A|A) < 1; 0 < P(A) < 1
+                        raise ValueError("Invalid P(A|A)!=1 for 0<P(A)<1")
+                    else : # P(A|A) = 1; 0 < P(A) < 1
+                        self._dict_cond[other] = fzb_val # overwrite if needed
+            else : # self is not other
+                if self.is_zero() : # A
+                    if other.is_zero() : # B
+                        if fzb_val.is_zero() :  # P(A)=0; P(B)=0; P(A|B)=0.
+                            self._dict_cond[other] = fzb_val # P(A|B) not used
+                        elif fzb_val.is_one() : # P(A)=0; P(B)=0; P(A|B)=1.
+                            raise ValueError("P(A|B)!=0, but P(A)=0")
+                        else :                  # P(A)=0; P(B)=0; 0<P(A|B)<1.
+                            raise ValueError("P(A|B)!=0, but P(A)=0")
+                    elif other.is_one() : # B
+                        if fzb_val.is_zero() :  # P(A)=0; P(B)=1; P(A|B)=0.
+                            self._dict_cond[other] = fzb_val # P(A)=P(A|B)=0
+                        elif fzb_val.is_one() : # P(A)=0; P(B)=1; P(A|B)=1.
+                            raise ValueError("P(A)=0, but P(A|B)!=0")
+                        else :                  # P(A)=0; P(B)=1; 0<P(A|B)<1.
+                            raise ValueError("P(A)=0, but P(A|B)!=0")
+                    else : # B
+                        if fzb_val.is_zero() :  # P(A)=0; 0<P(B)<1; P(A|B)=0.
+                            self._dict_cond[other] = fzb_val # P(A) ind. P(B)
+                        elif fzb_val.is_one() : # P(A)=0; 0<P(B)<1; P(A|B)=1.
+                            raise ValueError("P(A)=0, but P(A|B)!=0")
+                        else :                  # P(A)=0; 0<P(B)<1; 0<P(A|B)<1.
+                            raise ValueError("P(A)=0, but P(A|B)!=0")
+                elif self.is_one() : # A
+                    if other.is_zero() : # B
+                        if fzb_val.is_zero() :  # P(A)=1; P(B)=0; P(A|B)=0.
+                            self._dict_cond[other] = fzb_val # P(A|B) not used
+                        elif fzb_val.is_one() : # P(A)=1; P(B)=0; P(A|B)=1.
+                            self._dict_cond[other] = fzb_val # P(A|B) not used
+                        else :                  # P(A)=1; P(B)=0; 0<P(A|B)<1.
+                            self._dict_cond[other] = fzb_val # P(A|B) not used
+                    elif other.is_one() : # B
+                        if fzb_val.is_zero() :  # P(A)=1; P(B)=1; P(A|B)=0.
+                            raise ValueError("P(A)=P(B)=1, but P(A|B)!=1")
+                        elif fzb_val.is_one() : # P(A)=1; P(B)=1; P(A|B)=1.
+                            self._dict_cond[other] = fzb_val # fully determin.
+                        else :                  # P(A)=1; P(B)=1; 0<P(A|B)<1.
+                            raise ValueError("P(A)=P(B)=1, but P(A|B)!=1")
+                    else : # B
+                        if fzb_val.is_zero() :  # P(A)=1; 0<P(B)<1; P(A|B)=0.
+                            raise ValueError("P(A)=1, but P(A|B)!=1")
+                        elif fzb_val.is_one() : # P(A)=1; 0<P(B)<1; P(A|B)=1.
+                            self._dict_cond[other] = fzb_val # P(A) indep P(B)
+                        else :                  # P(A)=1; 0<P(B)<1; 0<P(A|B)<1.
+                            raise ValueError("P(A)=1, but P(A|B)!=1")
+                else : # A
+                    if other.is_zero() : # B
+                        if fzb_val.is_zero() :  # 0<P(A)<1; P(B)=0; P(A|B)=0.
+                            self._dict_cond[other] = fzb_val # P(A|B) not used
+                        elif fzb_val.is_one() : # 0<P(A)<1; P(B)=0; P(A|B)=1.
+                            self._dict_cond[other] = fzb_val # P(A|B) not used
+                        else :                  # 0<P(A)<1; P(B)=0; 0<P(A|B)<1.
+                            self._dict_cond[other] = fzb_val # P(A|B) not used
+                    elif other.is_one() : # B
+                        if fzb_val.is_zero() :  # 0<P(A)<1; P(B)=1; P(A|B)=0.
+                            raise ValueError("P(B)=1 & P(A|B)=0, but P(A)!=0")
+                        elif fzb_val.is_one() : # 0<P(A)<1; P(B)=1; P(A|B)=1.
+                            raise ValueError("P(B)=1 & P(A|B)=1, but P(A)!=1")
+                        else :                  # 0<P(A)<1; P(B)=1; 0<P(A|B)<1.
+                            if self == fzb_val :
+                                self._dict_cond[other] = fzb_val # P(A|B)=P(A)
+                            else :
+                                raise ValueError("P(B)=1 and P(A|B)!=P(A)")
+                    else : # B
+                        if fzb_val.is_zero() :  # 0<P(A)<1; 0<P(B)<1; P(A|B)=0.
+                            self._dict_cond[other] = fzb_val # A, B disjoint
+                        elif fzb_val.is_one() : # 0<P(A)<1; 0<P(B)<1; P(A|B)=1.
+                            self._dict_cond[other] = fzb_val # A superset of B
+                        else :                # 0<P(A)<1; 0<P(B)<1; 0<P(A|B)<1.
+                            self._dict_cond[other] = fzb_val # general case
+
+            # Bayes' theorem
             if self.is_zero() :
                 # P(other | self) = P(other), when P(self) = 0
                 other._dict_cond[self] = other
@@ -494,31 +582,38 @@ class Fzb :
                 other._dict_cond[self] = \
                     Fzb(fzb_val.value() * other.value() / self.value())
 
-    def given(self, other : "Fzb") :
+    def given(self, other : "Fzb") -> "Fzb" :
         # Return value of conditional probability
+        if self is other and (
+           self._dict_cond is None or self not in self._dict_cond):
+            if self.is_zero() :
+                return Fzb((self._val_type)(0.)) # P(A|A) = 0; P(A) = 0.
+            else :
+                return Fzb((self._val_type)(+1.)) # P(A|A) = 1; 0 < P(A) <= 1.
         if Fzb._bool_acp and not Fzb._bool_rcp and other in self._dict_cond :
-            return self._dict_cond[other].value()
+            return self._dict_cond[other]
         elif Fzb._bool_rcp :
-            return self._dict_cond[other].value()
+            return self._dict_cond[other] # Exception if not exists
         else : # other not in self._dict_cond
-            return self.value()
+            return self
 
-    def assume_independence(bool_indep : bool = True) :
+    def assume_independence(bool_indep : bool = True) -> None :
         Fzb.allow_conditional_probabilities(bool_acp = not bool_indep)
         Fzb.require_conditional_probabilities(bool_rcp = not bool_indep)
 
-    def assume_independence_by_default(bool_indep_by_dft : bool = True) :
+    def assume_independence_by_default(
+            bool_indep_by_dft : bool = True) -> None :
         Fzb.allow_conditional_probabilities(bool_acp = True)
         Fzb.require_conditional_probabilities(bool_rcp = not bool_indep_by_dft)
 
-    def allow_conditional_probabilities(bool_acp : bool = True) :
+    def allow_conditional_probabilities(bool_acp : bool = True) -> None :
         # If Fzb._bool_acp == True, value from self._dict_cond
         # (not self._val) will be used to for expression building in And, Or,
         # Xor, If, and Iff methods in each Fzb object, as long as it exist,
         # or else self._val is used.
         Fzb._bool_acp = bool_acp
 
-    def require_conditional_probabilities(bool_rcp : bool = True) :
+    def require_conditional_probabilities(bool_rcp : bool = True) -> None :
         # If Fzb._bool_rcp == True, value from self._dict_cond
         # (not self._val) will be used to for expression building in And, Or,
         # Xor, If, and Iff methods in each Fzb object, as long as it exist,
@@ -528,7 +623,7 @@ class Fzb :
         Fzb._bool_rcp = bool_rcp
 
 
-def main():
+def main()  -> None :
     fb_flt_x = Fzb(float(   0.7566666666666666666666666666666666666))
     fb_dec_x = Fzb(Decimal("0.7566666666666666666666666666666666666"))
     fb_mpf_x = Fzb(mpf(    "0.7566666666666666666666666666666666666"))
