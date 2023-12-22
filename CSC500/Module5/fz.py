@@ -38,6 +38,10 @@ Revision History:
     5. 12/13/2023: Refactored handling of conditional probabilities (CP). Added
                    identity support for CPs: P(A|A). Added validation of inputs
                    when CP value is set for A and B: P(A|B) = value.
+    6. 12/21/2023: Added fuzzy integer multiplication feature, at least for
+                   relatively small integers (bigger integers cause performance
+                   issue). Added comments on how to implement fuzzy
+                   factorization.
 
 @author: James J Johnson
 @url: https://www.linkedin.com/in/james-james-johnson/
@@ -109,11 +113,53 @@ Revision History:
 # instead of P(A) for expanding P(A and B) = P(A | B) * P(B). Note that only
 # multiplication part is affected, but not the addition part.
 ###############################################################################
+#                   Summary of factorization algorithm:
+#
+# 1. The product has N bits, where N is an even positive number with
+#    the minimal possible number of binary zeros on the left.
+#    The product must be padded with additional N zeros at the front,
+#    thus making is 2 * N bits long.
+# 2. Both factors must be N bits long (not 2 * N), padded with zeros
+#    (or other probabilities) at the front as needed to reach size N.
+# 3. Create 2 * N vertical deques (linked lists from Collections) for
+#    summations. Store these deques in a fixed-length built-in list of
+#    length 2 * N. The deques are initially populated with AND(a,b),
+#    where "a" and "b" are bits from different respective factors,
+#    selected by cross-pairing.
+# 4. The initial length of each list is from 0 to N.
+# 5. The lists are processed from the right most one to the left.
+# 6. Pairs of ANDs are merged with XOR (AND, AND), and the XOR results
+#    are appended to the same lists.
+# 7. At the same time when pairs of ANDs are merged with XORs like
+#    XOR(AND, AND), the carryovers are computed as AND(AND, AND), and
+#    these carryovers are appended to the next list on the left.
+# 8. When only one element is left in the list, this element is moved
+#    to the respective bit of the product, and the next list on the
+#    left is processed, unless it is empty or non-existent.
+# 9. Example with N = 6. The product is no longer than 6 bits (most
+#    likely, either 5 or 6, i.e. the left-mist one is in position 5 or
+#    6 from the right). Six padding zeros before the product are
+#    important to keep! In the image below, each 0 means 0, while each
+#    1 means a probability 0 <= p <= 1.
+#            |1 1 1 1 1 1
+#            |1 1 1 1 1 1
+# -----------+-----------
+#            |1 1 1 1 1 1
+#           1|1 1 1 1 1
+#         1 1|1 1 1 1
+#       1 1 1|1 1 1
+#     1 1 1 1|1 1
+#   1 1 1 1 1|1
+# -----------+-----------
+# 0 0 0 0 0 0|1 1 1 1 1 1
+#######################################################################
 
 
+from __future__ import annotations
 from decimal import Decimal, getcontext, InvalidOperation
 from mpmath import mpf, mp
 from sys import float_info
+from collections import deque
 
 
 class Fzb :
@@ -322,6 +368,9 @@ class Fzb :
         if self._val is None :
             self.evaluate()
         return self._val
+
+    def type(self) -> type :
+        return self._val_type
 
     def __bool__(self) -> bool :
         return bool(int(round(self.value())))
@@ -622,166 +671,440 @@ class Fzb :
             Fzb._bool_acp = True
         Fzb._bool_rcp = bool_rcp
 
+    def integer_to_fzb_list(
+            int_value : int = 0, # must be non-negative
+            int_min_num_bits : int = 1, # must be positive
+            fzb_type : type [float, Decimal, mpf] = float,) -> list[Fzb] :
+        # https://stackoverflow.com/questions/10411085/converting-integer-to-binary-in-python
+        # The binary representation is padded with zeros at the front, if
+        # possible or/and when necessary.
+        str_bin_repr = ('{0:0'+str(int_min_num_bits)+'b}').format(int_value)
+        lst_fzb_repr = [Fzb(val = fzb_type(1.) if c == '1' else fzb_type(0.)) \
+                        for c in str_bin_repr]
+        return lst_fzb_repr
+
+    def fzb_list_to_floating_point(
+            lst_fzb : list[Fzb]) -> float | Decimal | mpf :
+        fzb_type = lst_fzb[0].type() if len(lst_fzb) > 0 else float
+        result = fzb_type(0.)
+        curr_factor = fzb_type(1.)
+        two_factor = fzb_type(2.)
+        for i in range(len(lst_fzb) - 1, -1, -1) :
+            result += (lst_fzb[i].value() * curr_factor)
+            curr_factor *= two_factor
+        return result
+
+    def multiply_integers(
+            int_left_factor : int,
+            int_right_factor : int,
+            product_type : type [float, Decimal, mpf] = float,
+            ) -> float | Decimal | mpf :
+        (lst_fzb_left_factor, lst_fzb_right_factor, lst_fzb_product) = \
+            Fzb._init_in_out_for_long_multipl_from_int(
+                int_left_factor = int_left_factor,
+                int_right_factor = int_right_factor,
+                product_type = product_type,)
+        lst_deque_columns = Fzb._init_interm_val_for_long_multipl(
+            lst_fzb_left_factor = lst_fzb_left_factor,
+            lst_fzb_right_factor = lst_fzb_right_factor,)
+        if len(lst_fzb_product) != len(lst_deque_columns) :
+            raise("Error: different lengths of product list vs. deque list.")
+        lst_fzb_product = Fzb._run_long_multipl(
+            lst_deque_columns = lst_deque_columns,
+            lst_fzb_product = lst_fzb_product,)
+        product = Fzb.fzb_list_to_floating_point(lst_fzb = lst_fzb_product)
+        return product
+
+    def multiply_fzb_lists(
+            lst_fzb_left_factor : list[Fzb],
+            lst_fzb_right_factor :  list[Fzb],
+            ) -> list[Fzb] :
+        (lst_fzb_left_factor, lst_fzb_right_factor, lst_fzb_product) = \
+            Fzb._init_in_out_for_long_multipl_from_lst(
+                lst_fzb_left_factor = lst_fzb_left_factor,
+                lst_fzb_right_factor = lst_fzb_right_factor,)
+        lst_deque_columns = Fzb._init_interm_val_for_long_multipl(
+            lst_fzb_left_factor = lst_fzb_left_factor,
+            lst_fzb_right_factor = lst_fzb_right_factor,)
+        if len(lst_fzb_product) != len(lst_deque_columns) :
+            raise("Error: different lengths of product list vs. deque list.")
+        lst_fzb_product = Fzb._run_long_multipl(
+            lst_deque_columns = lst_deque_columns,
+            lst_fzb_product = lst_fzb_product,)
+        return lst_fzb_product
+
+    def _init_in_out_for_long_multipl_from_lst(
+            lst_fzb_left_factor : list[Fzb],
+            lst_fzb_right_factor :  list[Fzb],
+            ) -> tuple[list[Fzb], list[Fzb], list[Fzb]]:
+        product_type = lst_fzb_left_factor[0].type()
+        int_factors_target_length = max(
+            len(lst_fzb_left_factor), len(lst_fzb_right_factor))
+        if int_factors_target_length > len(lst_fzb_left_factor) :
+            lst_fzb_left_factor = [
+                Fzb(val = product_type(0.)) for _ in range(
+                    int_factors_target_length - len(lst_fzb_left_factor))] + \
+                lst_fzb_left_factor
+        if int_factors_target_length > len(lst_fzb_right_factor) :
+            lst_fzb_right_factor = [
+                Fzb(val = product_type(0.)) for _ in range(
+                    int_factors_target_length - len(lst_fzb_right_factor))] + \
+                lst_fzb_right_factor
+        int_product_target_length = 2 * int_factors_target_length
+        lst_fzb_product = [Fzb(val = product_type(0.)) for _ in range(
+            int_product_target_length)]
+        return (lst_fzb_left_factor, lst_fzb_right_factor, lst_fzb_product)
+
+    def _init_in_out_for_long_multipl_from_int(
+            int_left_factor : int,
+            int_right_factor : int,
+            product_type : type [float, Decimal, mpf] = float
+            ) -> tuple[list[Fzb], list[Fzb], list[Fzb]]:
+        lst_fzb_left_factor = Fzb.integer_to_fzb_list(
+            int_value = int_left_factor, int_min_num_bits = 1,
+            fzb_type = product_type)
+        lst_fzb_right_factor = Fzb.integer_to_fzb_list(
+            int_value = int_right_factor, int_min_num_bits = 1,
+            fzb_type = product_type)
+        int_factors_target_length = max(
+            len(lst_fzb_left_factor), len(lst_fzb_right_factor))
+        if int_factors_target_length > len(lst_fzb_left_factor) :
+            lst_fzb_left_factor = [
+                Fzb(val = product_type(0.)) for _ in range(
+                    int_factors_target_length - len(lst_fzb_left_factor))] + \
+                lst_fzb_left_factor
+        if int_factors_target_length > len(lst_fzb_right_factor) :
+            lst_fzb_right_factor = [
+                Fzb(val = product_type(0.)) for _ in range(
+                    int_factors_target_length - len(lst_fzb_right_factor))] + \
+                lst_fzb_right_factor
+        int_product_target_length = 2 * int_factors_target_length
+        lst_fzb_product = [Fzb(val = product_type(0.)) for _ in range(
+            int_product_target_length)]
+        return (lst_fzb_left_factor, lst_fzb_right_factor, lst_fzb_product)
+
+    def _init_interm_val_for_long_multipl(
+            lst_fzb_left_factor : list [Fzb],
+            lst_fzb_right_factor : list [Fzb],
+            ) -> list[deque[Fzb]]:
+        # Initialize list of deques for long (aka grade-school or standard)
+        # multiplication.
+        # https://en.wikipedia.org/wiki/Multiplication_algorithm
+        # https://docs.python.org/3/library/collections.html#collections.deque
+        if len(lst_fzb_left_factor) != len(lst_fzb_right_factor) :
+            raise ValueError("Error: different lengths of factor lists.")
+        lst_deque_ands = [deque() for _ in range(2 * len(lst_fzb_left_factor))]
+        int_deque_index = len(lst_deque_ands) - 1
+        for int_right_factor_index in range(len(
+                lst_fzb_right_factor) - 1, -1, -1) :
+            for int_left_factor_index in range(len(
+                    lst_fzb_left_factor) - 1, -1, -1) :
+                lst_deque_ands[int_deque_index].append(lst_fzb_right_factor[
+                    int_right_factor_index] & lst_fzb_left_factor[
+                        int_left_factor_index])
+                int_deque_index -= 1
+            int_deque_index += (len(lst_fzb_left_factor) - 1)
+        return lst_deque_ands
+
+    def _run_long_multipl(
+            lst_deque_columns : list[deque],
+            lst_fzb_product : list[Fzb],) -> list[Fzb] :
+        int_deque_index = len(lst_deque_columns) - 1
+        while int_deque_index >= 0 :
+            deque_curr_column = lst_deque_columns[int_deque_index]
+            while len(deque_curr_column) > 0 :
+                if len(deque_curr_column) == 1 :
+                    lst_fzb_product[int_deque_index] = \
+                        deque_curr_column.popleft() # flush to product
+                else : # if int_curr_deque_length >= 1
+                    fzb_left = deque_curr_column.popleft()
+                    fzb_right = deque_curr_column.popleft()
+                    # Add with "Xor"
+                    deque_curr_column.append(fzb_left ^ fzb_right)
+                    if (int_deque_index - 1) >= 0 :
+                        # Carryover with "And"
+                        lst_deque_columns[int_deque_index - 1].append(
+                            fzb_left & fzb_right)
+            int_deque_index -= 1
+        return lst_fzb_product
+
+    def bitwise_probability_to_fzb_list(
+            probability : float | Decimal | mpf = .5,
+            int_num_bits : int = 1) -> list[Fzb] :
+        lst_fzb_repr = [Fzb(val = probability) for _ in range(int_num_bits)]
+        return lst_fzb_repr
+
 
 def main()  -> None :
-    fb_flt_x = Fzb(float(   0.7566666666666666666666666666666666666))
-    fb_dec_x = Fzb(Decimal("0.7566666666666666666666666666666666666"))
-    fb_mpf_x = Fzb(mpf(    "0.7566666666666666666666666666666666666"))
-    print(fb_flt_x.value())
-    print(fb_dec_x.value())
-    print(fb_mpf_x.value())
 
-    fb_flt_y = fb_flt_x.Not()
-    fb_dec_y = fb_dec_x.Not()
-    fb_mpf_y = fb_mpf_x.Not()
-    print(fb_flt_x.value())
-    print(fb_dec_x.value())
-    print(fb_mpf_x.value())
-    print(fb_flt_y.value())
-    print(fb_dec_y.value())
-    print(fb_mpf_y.value())
-    print(bool(fb_flt_x))
-    print(bool(fb_dec_x))
-    print(bool(fb_mpf_x))
-    print(bool(fb_flt_y))
-    print(bool(fb_dec_y))
-    print(bool(fb_mpf_y))
-    print(fb_flt_x.value())
-    print(fb_dec_x.value())
-    print(fb_mpf_x.value())
-    print(fb_flt_y.value())
-    print(fb_dec_y.value())
-    print(fb_mpf_y.value())
+    if False :
+        fb_flt_x = Fzb(float(   0.7566666666666666666666666666666666666))
+        fb_dec_x = Fzb(Decimal("0.7566666666666666666666666666666666666"))
+        fb_mpf_x = Fzb(mpf(    "0.7566666666666666666666666666666666666"))
+        print(fb_flt_x.value())
+        print(fb_dec_x.value())
+        print(fb_mpf_x.value())
 
-    print()
+        fb_flt_y = fb_flt_x.Not()
+        fb_dec_y = fb_dec_x.Not()
+        fb_mpf_y = fb_mpf_x.Not()
+        print(fb_flt_x.value())
+        print(fb_dec_x.value())
+        print(fb_mpf_x.value())
+        print(fb_flt_y.value())
+        print(fb_dec_y.value())
+        print(fb_mpf_y.value())
+        print(bool(fb_flt_x))
+        print(bool(fb_dec_x))
+        print(bool(fb_mpf_x))
+        print(bool(fb_flt_y))
+        print(bool(fb_dec_y))
+        print(bool(fb_mpf_y))
+        print(fb_flt_x.value())
+        print(fb_dec_x.value())
+        print(fb_mpf_x.value())
+        print(fb_flt_y.value())
+        print(fb_dec_y.value())
+        print(fb_mpf_y.value())
 
-    fb_flt_x = Fzb(float(   0.75))
-    fb_flt_z = Fzb(float(   0.25))
-    fb_flt_a = fb_flt_x.And(fb_flt_z)
-    print("Independent inputs (x and z):")
-    print(fb_flt_x.value(), "and", fb_flt_z.value(), "=", fb_flt_a.value())
-    fb_flt_b = fb_flt_x.Or(fb_flt_z)
-    print(fb_flt_x.value(), "or", fb_flt_z.value(), "=", fb_flt_b.value())
+        print()
 
-    fb_flt_x = Fzb(float(   0.75))
-    fb_flt_z = fb_flt_x.Not()
-    fb_flt_a = fb_flt_x.And(fb_flt_z)
-    print("Dependent inputs (x and not(x)):")
-    print(fb_flt_x.value(), "and", fb_flt_z.value(), "=", fb_flt_a.value())
-    fb_flt_b = fb_flt_x.Or(fb_flt_z)
-    print(fb_flt_x.value(), "or", fb_flt_z.value(), "=", fb_flt_b.value())
+    if False :
+        fb_flt_x = Fzb(float(   0.75))
+        fb_flt_z = Fzb(float(   0.25))
+        fb_flt_a = fb_flt_x.And(fb_flt_z)
+        print("Independent inputs (x and z):")
+        print(fb_flt_x.value(), "and", fb_flt_z.value(), "=", fb_flt_a.value())
+        fb_flt_b = fb_flt_x.Or(fb_flt_z)
+        print(fb_flt_x.value(), "or", fb_flt_z.value(), "=", fb_flt_b.value())
 
-    fb_flt_x = Fzb(float(   0.75))
-    fb_flt_z = fb_flt_x.Not()
-    fb_flt_a = fb_flt_x.Not().And(fb_flt_z)
-    print("Dependent inputs (not(x) and not(x)):")
-    print("not(", fb_flt_x.value(), ") and", fb_flt_z.value(), "=", fb_flt_a.value())
-    fb_flt_b = fb_flt_x.Not().Or(fb_flt_z)
-    print("not(", fb_flt_x.value(), ") or", fb_flt_z.value(), "=", fb_flt_b.value())
+        fb_flt_x = Fzb(float(   0.75))
+        fb_flt_z = fb_flt_x.Not()
+        fb_flt_a = fb_flt_x.And(fb_flt_z)
+        print("Dependent inputs (x and not(x)):")
+        print(fb_flt_x.value(), "and", fb_flt_z.value(), "=", fb_flt_a.value())
+        fb_flt_b = fb_flt_x.Or(fb_flt_z)
+        print(fb_flt_x.value(), "or", fb_flt_z.value(), "=", fb_flt_b.value())
 
-    print()
-    print(Fzb(0.75).Xor(Fzb(0.25)))
-    print(Fzb(0.5).Xor(Fzb(0.5)))
-    print(Fzb(0.75).If(Fzb(0.25)))
-    print(Fzb(0.5).If(Fzb(0.5)))
-    print(Fzb(0.75).Iff(Fzb(0.25)))
-    print(Fzb(0.5).Iff(Fzb(0.5)))
+        fb_flt_x = Fzb(float(   0.75))
+        fb_flt_z = fb_flt_x.Not()
+        fb_flt_a = fb_flt_x.Not().And(fb_flt_z)
+        print("Dependent inputs (not(x) and not(x)):")
+        print("not(", fb_flt_x.value(), ") and", fb_flt_z.value(), "=", fb_flt_a.value())
+        fb_flt_b = fb_flt_x.Not().Or(fb_flt_z)
+        print("not(", fb_flt_x.value(), ") or", fb_flt_z.value(), "=", fb_flt_b.value())
 
-    #from decimal import Decimal
-    #from mpmath import mpf
-    #from fz import Fzb
+    if False :
+        print()
+        print(Fzb(0.75).Xor(Fzb(0.25)))
+        print(Fzb(0.5).Xor(Fzb(0.5)))
+        print(Fzb(0.75).If(Fzb(0.25)))
+        print(Fzb(0.5).If(Fzb(0.5)))
+        print(Fzb(0.75).Iff(Fzb(0.25)))
+        print(Fzb(0.5).Iff(Fzb(0.5)))
 
-    x1 = Fzb(.75)
-    x2 = Fzb(.25)
-    x3 = Fzb(.75)
-    print("x1 = {0:s}".format(str(x1)))
-    print("x2 = {0:s}".format(str(x2)))
-    print("x3 = {0:s}".format(str(x3)))
-    print("not(x1) = {0:s} = {1:s}".format(str(x1.Not()), str(~x1)))
-    print("and(x1, x2) = {0:s} = {1:s}".format(str(x1.And(x2)), str(x1 & x2) ))
-    print("and(x1, x3) = {0:s} = {1:s}".format(str(x1.And(x3)), str(x1 & x3) ))
-    print("and(x1, x1) = {0:s} = {1:s}".format(str(x1.And(x1)), str(x1 & x1) ))
-    print("or(x1, x2) = {0:s} = {1:s}".format(str(x1.Or(x2)), str(x1 | x2) ))
-    print("or(x1, x3) = {0:s} = {1:s}".format(str(x1.Or(x3)), str(x1 | x3) ))
-    print("or(x1, x1) = {0:s} = {1:s}".format(str(x1.Or(x1)), str(x1 | x1) ))
-    print("xor(x1, x2) = {0:s} = {1:s}".format(str(x1.Xor(x2)), str(x1 ^ x2) ))
-    print("if(x1, x2) = {0:s} = {1:s}".format(str(x1.If(x2)), str(x1 >> x2) ))
-    print("iff(x1, x2) = {0:s} = {1:s}".format(str(x1.Iff(x2)), str(x1 << x2) ))
-    print("xor(and(x1, x2), and(x2, x3)) = {0:s} = {1:s}".format(
-        str(x1.And(x2).Xor(x2.And(x3))), str((x1 & x2) ^ (x2 & x3))))
-    print()
+    if False :
+        #from decimal import Decimal
+        #from mpmath import mpf
+        #from fz import Fzb
 
-    x4 = Fzb(Decimal(1.) / Decimal(3.))
-    x5 = Fzb(Decimal(2.) / Decimal(3.))
-    print("x4 = {0:s}".format(str(x4)))
-    print("x5 = {0:s}".format(str(x5)))
-    print("and(x4, x5) = {0:s}".format(str(x4.And(x5))))
-    print()
+        x1 = Fzb(.75)
+        x2 = Fzb(.25)
+        x3 = Fzb(.75)
+        print("x1 = {0:s}".format(str(x1)))
+        print("x2 = {0:s}".format(str(x2)))
+        print("x3 = {0:s}".format(str(x3)))
+        print("not(x1) = {0:s} = {1:s}".format(str(x1.Not()), str(~x1)))
+        print("and(x1, x2) = {0:s} = {1:s}".format(str(x1.And(x2)), str(x1 & x2) ))
+        print("and(x1, x3) = {0:s} = {1:s}".format(str(x1.And(x3)), str(x1 & x3) ))
+        print("and(x1, x1) = {0:s} = {1:s}".format(str(x1.And(x1)), str(x1 & x1) ))
+        print("or(x1, x2) = {0:s} = {1:s}".format(str(x1.Or(x2)), str(x1 | x2) ))
+        print("or(x1, x3) = {0:s} = {1:s}".format(str(x1.Or(x3)), str(x1 | x3) ))
+        print("or(x1, x1) = {0:s} = {1:s}".format(str(x1.Or(x1)), str(x1 | x1) ))
+        print("xor(x1, x2) = {0:s} = {1:s}".format(str(x1.Xor(x2)), str(x1 ^ x2) ))
+        print("if(x1, x2) = {0:s} = {1:s}".format(str(x1.If(x2)), str(x1 >> x2) ))
+        print("iff(x1, x2) = {0:s} = {1:s}".format(str(x1.Iff(x2)), str(x1 << x2) ))
+        print("xor(and(x1, x2), and(x2, x3)) = {0:s} = {1:s}".format(
+            str(x1.And(x2).Xor(x2.And(x3))), str((x1 & x2) ^ (x2 & x3))))
+        print()
 
-    x6 = Fzb(mpf(1.) / mpf(3.))
-    x7 = Fzb(mpf(2.) / mpf(3.))
-    print("x6 = {0:s}".format(str(x6)))
-    print("x7 = {0:s}".format(str(x7)))
-    print("or(x6, x7) = {0:s}".format(str(x4.Or(x5))))
-    print()
+        x4 = Fzb(Decimal(1.) / Decimal(3.))
+        x5 = Fzb(Decimal(2.) / Decimal(3.))
+        print("x4 = {0:s}".format(str(x4)))
+        print("x5 = {0:s}".format(str(x5)))
+        print("and(x4, x5) = {0:s}".format(str(x4.And(x5))))
+        print()
 
-    lst = [x0,x1,x2,x3,x4,x5,x6,x7,x8,x9,x10] = \
-        [Fzb(Decimal(str(round(i/10.,10)))) for i in range(11)]
-    for (i,x) in enumerate(lst) :
-        print("x" + str(i) + "=" + str(x), end="; ")
-    # x0=0.0; x1=0.1; x2=0.2; x3=0.3; x4=0.4; x5=0.5; x6=0.6; x7=0.7; x8=0.8; x9=0.9; x10=1.0;
-    print()
-    print( ( (~x3 & (x5 | x1)) & (x4 | x8) | (~x9 & ~x5) ) ) # 0.385720
-    print( ( (x3.Not().And(x5.Or(x1))).And(x4.Or(x8)).Or(x9.Not().And(x5.Not())) ) ) # 0.385720
+        x6 = Fzb(mpf(1.) / mpf(3.))
+        x7 = Fzb(mpf(2.) / mpf(3.))
+        print("x6 = {0:s}".format(str(x6)))
+        print("x7 = {0:s}".format(str(x7)))
+        print("or(x6, x7) = {0:s}".format(str(x4.Or(x5))))
+        print()
+
+        lst = [x0,x1,x2,x3,x4,x5,x6,x7,x8,x9,x10] = \
+            [Fzb(Decimal(str(round(i/10.,10)))) for i in range(11)]
+        for (i,x) in enumerate(lst) :
+            print("x" + str(i) + "=" + str(x), end="; ")
+        # x0=0.0; x1=0.1; x2=0.2; x3=0.3; x4=0.4; x5=0.5; x6=0.6; x7=0.7; x8=0.8; x9=0.9; x10=1.0;
+        print()
+        print( ( (~x3 & (x5 | x1)) & (x4 | x8) | (~x9 & ~x5) ) ) # 0.385720
+        print( ( (x3.Not().And(x5.Or(x1))).And(x4.Or(x8)).Or(x9.Not().And(x5.Not())) ) ) # 0.385720
 
 ###############################################################################
 
-    # from decimal import Decimal
-    # from mpmath import mpf
-    # from fz import Fzb
+    if False :
+        # from decimal import Decimal
+        # from mpmath import mpf
+        # from fz import Fzb
 
-    # Fzb.assume_independence_by_default(bool_indep_by_dft = True)
-    # Fzb.allow_conditional_probabilities(bool_acp = True)
-    # Fzb.assume_independence(bool_indep=False) # equivalent to the call below
-    Fzb.require_conditional_probabilities(bool_rcp=True)
+        # Fzb.assume_independence_by_default(bool_indep_by_dft = True)
+        # Fzb.allow_conditional_probabilities(bool_acp = True)
+        # Fzb.assume_independence(bool_indep=False) # equivalent to the call below
+        Fzb.require_conditional_probabilities(bool_rcp=True)
 
-    print()
-    print("Using conditional probabilities for independent variables:")
-    P_A1 = Fzb(.75)
-    P_B1 = Fzb(.25)
-    P_A1_given_B1 = P_A1
-    P_A1.conditional_on(other = P_B1, val = P_A1_given_B1)
-    print("P(A1) = {0:s}".format(str(P_A1)))
-    print("P(B1) = {0:s}".format(str(P_B1)))
-    print("P(A1 | B1) = {0:s}".format(str(P_A1_given_B1)))
-    print("P(B1 | A1) = {0:s}".format(str(P_B1.given(P_A1))))
-    print("and(A1, B1) = {0:s} = {1:s}".format(
-        str(P_A1.And(P_B1)), str(P_A1 & P_B1) ))
-    print("or(A1, B1) = {0:s} = {1:s}".format(
-        str(P_A1.Or(P_B1)), str(P_A1 | P_B1) ))
-    print("and(B1, A1) = {0:s} = {1:s}".format(
-        str(P_B1.And(P_A1)), str(P_B1 & P_A1) ))
-    print("or(B1, A1) = {0:s} = {1:s}".format(
-        str(P_B1.Or(P_A1)), str(P_B1 | P_A1) ))
+        print()
+        print("Using conditional probabilities for independent variables:")
+        P_A1 = Fzb(.75)
+        P_B1 = Fzb(.25)
+        P_A1_given_B1 = P_A1
+        P_A1.conditional_on(other = P_B1, val = P_A1_given_B1)
+        print("P(A1) = {0:s}".format(str(P_A1)))
+        print("P(B1) = {0:s}".format(str(P_B1)))
+        print("P(A1 | B1) = {0:s}".format(str(P_A1_given_B1)))
+        print("P(B1 | A1) = {0:s}".format(str(P_B1.given(P_A1))))
+        print("and(A1, B1) = {0:s} = {1:s}".format(
+            str(P_A1.And(P_B1)), str(P_A1 & P_B1) ))
+        print("or(A1, B1) = {0:s} = {1:s}".format(
+            str(P_A1.Or(P_B1)), str(P_A1 | P_B1) ))
+        print("and(B1, A1) = {0:s} = {1:s}".format(
+            str(P_B1.And(P_A1)), str(P_B1 & P_A1) ))
+        print("or(B1, A1) = {0:s} = {1:s}".format(
+            str(P_B1.Or(P_A1)), str(P_B1 | P_A1) ))
 
-    print()
-    print("Using conditional probabilities for dependent variables:")
-    P_A2 = Fzb(.75)
-    P_B2 = Fzb(.25)
-    P_A2_given_B2 = Fzb(.5) # not P_A2
-    P_A2.conditional_on(other = P_B2, val = P_A2_given_B2)
-    print("P(A2) = {0:s}".format(str(P_A2)))
-    print("P(B2) = {0:s}".format(str(P_B2)))
-    print("P(A2 | B2) = {0:s}".format(str(P_A2_given_B2)))
-    print("P(B2 | A2) = {0:s}".format(str(P_B2.given(P_A2))))
-    print("and(A2, B2) = {0:s} = {1:s}".format(
-        str(P_A2.And(P_B2)), str(P_A2 & P_B2) ))
-    print("or(A2, B2) = {0:s} = {1:s}".format(
-        str(P_A2.Or(P_B2)), str(P_A2 | P_B2) ))
-    print("and(B2, A2) = {0:s} = {1:s}".format(
-        str(P_B2.And(P_A2)), str(P_B2 & P_A2) ))
-    print("or(B2, A2) = {0:s} = {1:s}".format(
-        str(P_B2.Or(P_A2)), str(P_B2 | P_A2) ))
+        print()
+        print("Using conditional probabilities for dependent variables:")
+        P_A2 = Fzb(.75)
+        P_B2 = Fzb(.25)
+        P_A2_given_B2 = Fzb(.5) # not P_A2
+        P_A2.conditional_on(other = P_B2, val = P_A2_given_B2)
+        print("P(A2) = {0:s}".format(str(P_A2)))
+        print("P(B2) = {0:s}".format(str(P_B2)))
+        print("P(A2 | B2) = {0:s}".format(str(P_A2_given_B2)))
+        print("P(B2 | A2) = {0:s}".format(str(P_B2.given(P_A2))))
+        print("and(A2, B2) = {0:s} = {1:s}".format(
+            str(P_A2.And(P_B2)), str(P_A2 & P_B2) ))
+        print("or(A2, B2) = {0:s} = {1:s}".format(
+            str(P_A2.Or(P_B2)), str(P_A2 | P_B2) ))
+        print("and(B2, A2) = {0:s} = {1:s}".format(
+            str(P_B2.And(P_A2)), str(P_B2 & P_A2) ))
+        print("or(B2, A2) = {0:s} = {1:s}".format(
+            str(P_B2.Or(P_A2)), str(P_B2 | P_A2) ))
+
+###############################################################################
+
+    if True :
+        lst_fzb = Fzb.integer_to_fzb_list(
+            int_value = 5, int_min_num_bits = 8, fzb_type = float)
+        for fzb in lst_fzb :
+            print(fzb.value(), end="; ")
+            # print(id(fzb), end="; ")
+        print()
+
+        print()
+        lst_fzb = Fzb.bitwise_probability_to_fzb_list(
+            probability = float(.7777777777777777777777), int_num_bits = 8,)
+        for fzb in lst_fzb :
+            print(fzb.value(), end="; ")
+            # print(id(fzb), end="; ")
+        print()
+        lst_fzb = Fzb.bitwise_probability_to_fzb_list(
+            probability = Decimal(".888888888888888888888"), int_num_bits = 8,)
+        for fzb in lst_fzb :
+            print(fzb.value(), end="; ")
+            # print(id(fzb), end="; ")
+        print()
+        lst_fzb = Fzb.bitwise_probability_to_fzb_list(
+            probability = mpf(".6666666666666666666666666"), int_num_bits = 8,)
+        for fzb in lst_fzb :
+            print(fzb.value(), end="; ")
+            # print(id(fzb), end="; ")
+        print()
+        print()
+
+    if True :
+        int_left_factor = 23
+        int_right_factor = 31
+        int_product = int_left_factor * int_right_factor
+        print("Native (int): {0:d} * {1:d} = {2:s}".format(
+            int_left_factor, int_right_factor, str(int_product)))
+        flt_product = Fzb.multiply_integers(
+            int_left_factor=int_left_factor, int_right_factor=int_right_factor,
+            product_type = float)
+        print("Fuzzy (float): {0:d} * {1:d} = {2:s}".format(
+            int_left_factor, int_right_factor, str(flt_product)))
+        mpf_product = Fzb.multiply_integers(
+            int_left_factor=int_left_factor, int_right_factor=int_right_factor,
+            product_type = mpf)
+        print("Fuzzy (mpf): {0:d} * {1:d} = {2:s}".format(
+            int_left_factor, int_right_factor, str(mpf_product)))
+        print()
+
+    if True :
+        int_left_factor = 23
+        int_right_factor = 31
+        lst_fzb_left_factor = Fzb.integer_to_fzb_list(
+            int_value = int_left_factor)
+        lst_fzb_right_factor = Fzb.integer_to_fzb_list(
+                int_value = int_right_factor)
+        lst_fzb_product = Fzb.multiply_fzb_lists(
+            lst_fzb_left_factor = lst_fzb_left_factor,
+            lst_fzb_right_factor = lst_fzb_right_factor,)
+
+        print()
+        for fzb in lst_fzb_left_factor :
+            print(fzb.value(), end="; ")
+        print("* ")
+        for fzb in lst_fzb_right_factor :
+            print(fzb.value(), end="; ")
+        print("= ")
+        for fzb in lst_fzb_product :
+            print(fzb.value(), end="; ")
+        print("\n")
+        print("{0:s} * {1:s} = {2:s}".format(
+            str(Fzb.fzb_list_to_floating_point(lst_fzb_left_factor)),
+            str(Fzb.fzb_list_to_floating_point(lst_fzb_right_factor)),
+            str(Fzb.fzb_list_to_floating_point(lst_fzb_product)),
+            ))
+        print()
+
+        lst_fzb_right_factor[2] = Fzb((lst_fzb_right_factor[2].type())(0.25))
+        lst_fzb_product = Fzb.multiply_fzb_lists(
+            lst_fzb_left_factor = lst_fzb_left_factor,
+            lst_fzb_right_factor = lst_fzb_right_factor,)
+
+        print()
+        for fzb in lst_fzb_left_factor :
+            print(fzb.value(), end="; ")
+        print("* ")
+        for fzb in lst_fzb_right_factor :
+            print(fzb.value(), end="; ")
+        print("= ")
+        for fzb in lst_fzb_product :
+            print(fzb.value(), end="; ")
+        print("\n")
+        print("{0:s} * {1:s} = {2:s}".format(
+            str(Fzb.fzb_list_to_floating_point(lst_fzb_left_factor)),
+            str(Fzb.fzb_list_to_floating_point(lst_fzb_right_factor)),
+            str(Fzb.fzb_list_to_floating_point(lst_fzb_product)),
+            ))
+
+        lst_fzb_right_factor_alt = Fzb.integer_to_fzb_list(
+                int_value = 28)
+        print("\n{0:s} = ".format(str(Fzb.fzb_list_to_floating_point(
+            lst_fzb_right_factor_alt))), end="")
+        for fzb in lst_fzb_right_factor_alt :
+            print(fzb.value(), end="; ")
 
 
 if __name__ ==  '__main__':
