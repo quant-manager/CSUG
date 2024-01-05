@@ -38,7 +38,7 @@ Revision History:
     5. 12/13/2023: Refactored handling of conditional probabilities (CP). Added
                    identity support for CPs: P(A|A). Added validation of inputs
                    when CP value is set for A and B: P(A|B) = value.
-    6. 12/21/2023: Added fuzzy integer multiplication feature, at least for
+    6. 01/04/2024: Added fuzzy integer multiplication feature, at least for
                    relatively small integers (bigger integers cause performance
                    issue). Added comments on how to implement fuzzy
                    factorization.
@@ -160,6 +160,7 @@ from decimal import Decimal, getcontext, InvalidOperation
 from mpmath import mpf, mp
 from sys import float_info
 from collections import deque
+import copy
 
 
 class Fzb :
@@ -835,6 +836,119 @@ class Fzb :
         return lst_fzb_repr
 
 
+class Fzi :
+
+    def __init__(
+            self,
+            # iff "int", must be non-negative
+            val : int | float | Decimal | mpf | list[Fzb] = int(0),
+            int_min_num_bits : int = None, # 1; must be positive
+            fzb_type : type [float, Decimal, mpf] = None, # float
+            bool_deep_copy : bool = True,) -> None :
+        self._flt_val = None
+        self._lst_fzb = None
+        if not isinstance(val, int) and \
+           not isinstance(val, float) and \
+           not isinstance(val, Decimal) and \
+           not isinstance(val, mpf) and \
+           not isinstance(val, list) :
+            raise TypeError("Invalid value type for fuzzy integer")
+        if isinstance(val, int) and val < 0 :
+            raise TypeError("Invalid negative value for fuzzy integer")
+        if int_min_num_bits is not None and \
+           (not isinstance(int_min_num_bits, int) or \
+            isinstance(int_min_num_bits, int) and int_min_num_bits < 1 ) :
+            raise TypeError("Invalid non-positive minimum number of fuzzy " +
+                            "bits for fuzzy integer")
+        if fzb_type is not None and fzb_type is not float and \
+           fzb_type is not Decimal and fzb_type is not mpf :
+            raise TypeError("Invalid fuzzy bit type for fuzzy integer")
+        # if isinstance(val,list), then all Fzb elems must have type fzb_type
+        if isinstance(val, int) :
+            self._lst_fzb = Fzb.integer_to_fzb_list(
+                int_value = val,
+                int_min_num_bits = 1 if int_min_num_bits is None \
+                    else int_min_num_bits,
+                fzb_type = float if fzb_type is None \
+                    else fzb_type,)
+        elif isinstance(val, float) or isinstance(val, Decimal) or \
+             isinstance(val, mpf):
+            self._lst_fzb = Fzb.bitwise_probability_to_fzb_list(
+                    probability = val, int_num_bits = \
+                        1 if int_min_num_bits is None else int_min_num_bits)
+        elif isinstance(val, list) :
+            if bool_deep_copy :
+                # deep copy for list, but not for its Fzb elements
+                self._lst_fzb = copy.deepcopy(val)
+            else :
+                self._lst_fzb = val
+        else :
+            raise TypeError("Invalid value type for fuzzy integer")
+
+    def __mul__(self, other):
+        lst_fzb = Fzb.multiply_fzb_lists(
+            lst_fzb_left_factor = self._lst_fzb,
+            lst_fzb_right_factor = other._lst_fzb,)
+        return Fzi(
+            val = lst_fzb,
+            int_min_num_bits = 1,
+            fzb_type = lst_fzb[0].type(),
+            bool_deep_copy = True)
+
+    def multiply_integers(
+            int_left_factor : int,
+            int_right_factor : int,
+            product_type : type [float, Decimal, mpf] = float,
+            ) -> float | Decimal | mpf :
+        return Fzb.multiply_integers(
+            int_left_factor = int_left_factor,
+            int_right_factor = int_right_factor,
+            product_type = product_type,)
+
+    def evaluate(self) -> None :
+        self._flt_val = Fzb.fzb_list_to_floating_point(lst_fzb = self._lst_fzb)
+
+    def value(self) -> float | Decimal | mpf :
+        if self._flt_val is None :
+            self.evaluate()
+        return self._flt_val
+
+    def type(self) -> type :
+        return self._lst_fzb[0].type()
+
+    def __bool__(self) -> bool :
+        return bool(self.value())
+
+    def __str__(self) -> str :
+        return str(self.value())
+
+    def __repr__(self) -> str :
+        return "; ".join([str(fzb.value()) for fzb in self._lst_fzb])
+
+    def __len__(self) -> int :
+        return len(self._lst_fzb)
+
+    def __getitem__(self, key : int) -> Fzb :
+        return self._lst_fzb[key]
+
+    def __setitem__(self, key : int, val : Fzb) -> None :
+        # Warning: fuzzy bits in a fuzzy integer are indexed from right to left
+        # In other words, fuzzy bit with index zero is adjacent to the
+        # fractional point to the right.
+        if key < 0 :
+            # insert at index 0
+            # self._lst_fzb.insert(0, val)
+            self._lst_fzb.append(val)
+        elif key < len(self) :
+            # set at index key
+            self._lst_fzb[len(self) - key - 1] = val
+        else :
+            # append
+            # self._lst_fzb.append(val)
+            self._lst_fzb.insert(0, val)
+        if self._flt_val is not None :
+            self.evaluate()
+
 def main()  -> None :
 
     if False :
@@ -951,7 +1065,7 @@ def main()  -> None :
         print( ( (~x3 & (x5 | x1)) & (x4 | x8) | (~x9 & ~x5) ) ) # 0.385720
         print( ( (x3.Not().And(x5.Or(x1))).And(x4.Or(x8)).Or(x9.Not().And(x5.Not())) ) ) # 0.385720
 
-###############################################################################
+    ###########################################################################
 
     if False :
         # from decimal import Decimal
@@ -1001,9 +1115,9 @@ def main()  -> None :
         print("or(B2, A2) = {0:s} = {1:s}".format(
             str(P_B2.Or(P_A2)), str(P_B2 | P_A2) ))
 
-###############################################################################
+    ###########################################################################
 
-    if True :
+    if False :
         lst_fzb = Fzb.integer_to_fzb_list(
             int_value = 5, int_min_num_bits = 8, fzb_type = float)
         for fzb in lst_fzb :
@@ -1032,7 +1146,7 @@ def main()  -> None :
         print()
         print()
 
-    if True :
+    if False :
         int_left_factor = 23
         int_right_factor = 31
         int_product = int_left_factor * int_right_factor
@@ -1050,7 +1164,7 @@ def main()  -> None :
             int_left_factor, int_right_factor, str(mpf_product)))
         print()
 
-    if True :
+    if False :
         int_left_factor = 23
         int_right_factor = 31
         lst_fzb_left_factor = Fzb.integer_to_fzb_list(
@@ -1106,6 +1220,94 @@ def main()  -> None :
         for fzb in lst_fzb_right_factor_alt :
             print(fzb.value(), end="; ")
 
+    ###########################################################################
+    if True :
+        fzi1 = Fzi(val = 5, int_min_num_bits = 6)
+        print(repr(fzi1)) # 0.0; 0.0; 0.0; 1.0; 0.0; 1.0
+        print(fzi1) # 5
+        print()
+
+        fzi2 = Fzi(val = float(.777), int_min_num_bits = 6)
+        print(repr(fzi2)) # 0.777; 0.777; 0.777; 0.777; 0.777; 0.777
+        print(fzi2) # 48.95100000000001
+        print()
+
+        fzi3 = Fzi(val = Decimal(".888"), int_min_num_bits = 6)
+        print(repr(fzi3)) # 0.888; 0.888; 0.888; 0.888; 0.888; 0.888
+        print(fzi3) # 55.944
+        print()
+
+        fzi4 = Fzi(val = mpf(".999"), int_min_num_bits = 6)
+        print(repr(fzi4)) # 0.999; 0.999; 0.999; 0.999; 0.999; 0.999
+        print(fzi4) # 62.937
+        print()
+
+    if True :
+        print()
+        print()
+        int_left_factor = 23
+        int_right_factor = 31
+        int_product = int_left_factor * int_right_factor
+        print("Native (int): {0:s} * {1:s} = {2:s}".format(
+            str(int_left_factor), str(int_right_factor), str(int_product)))
+
+        fzi_flt_left_factor = Fzi(int_left_factor, fzb_type = float)
+        fzi_flt_right_factor = Fzi(int_right_factor, fzb_type = float)
+        fzi_flt_product = fzi_flt_left_factor * fzi_flt_right_factor
+        print("Fuzzy (float): {0:s} * {1:s} = {2:s}".format(
+            str(fzi_flt_left_factor), str(fzi_flt_right_factor),
+            str(fzi_flt_product)))
+
+        fzi_mpf_left_factor = Fzi(int_left_factor, fzb_type = mpf)
+        fzi_mpf_right_factor = Fzi(int_right_factor, fzb_type = mpf)
+        fzi_mpf_product = fzi_mpf_left_factor * fzi_mpf_right_factor
+        print("Fuzzy (mpf): {0:s} * {1:s} = {2:s}".format(
+            str(fzi_mpf_left_factor), str(fzi_mpf_right_factor),
+            str(fzi_mpf_product)))
+
+    if True :
+        print()
+        print()
+        fzi_flt_left_factor = Fzi(23, fzb_type = float)
+        fzi_flt_right_factor = Fzi(31, fzb_type = float)
+        fzi_flt_product = fzi_flt_left_factor * fzi_flt_right_factor
+        print(repr(fzi_flt_left_factor) + " *")
+        print(repr(fzi_flt_right_factor) + " =")
+        print(repr(fzi_flt_product))
+        print()
+        print("{0:s} * {1:s} = {2:s}".format(
+            str(fzi_flt_left_factor),
+            str(fzi_flt_right_factor),
+            str(fzi_flt_product),))
+        print()
+
+        fzi_flt_right_factor[2] = Fzb(val = (fzi_flt_right_factor.type())(.25))
+        fzi_flt_product = fzi_flt_left_factor * fzi_flt_right_factor
+        print(repr(fzi_flt_left_factor) + " *")
+        print(repr(fzi_flt_right_factor) + " =")
+        print(repr(fzi_flt_product))
+        print()
+        print("{0:s} * {1:s} = {2:s}".format(
+            str(fzi_flt_left_factor),
+            str(fzi_flt_right_factor),
+            str(fzi_flt_product),))
+        print()
+        print(str(fzi_flt_right_factor), "==", repr(fzi_flt_right_factor))
+
+        fzi_flt_alt_right_factor = Fzi(28, fzb_type = float)
+        print(str(fzi_flt_alt_right_factor), "==", repr(fzi_flt_alt_right_factor))
+        print()
+
+        fzi_flt_product = fzi_flt_left_factor * fzi_flt_alt_right_factor
+        print(repr(fzi_flt_left_factor) + " *")
+        print(repr(fzi_flt_alt_right_factor) + " =")
+        print(repr(fzi_flt_product))
+        print()
+        print("{0:s} * {1:s} = {2:s}".format(
+            str(fzi_flt_left_factor),
+            str(fzi_flt_alt_right_factor),
+            str(fzi_flt_product),))
+        print()
 
 if __name__ ==  '__main__':
     main()
